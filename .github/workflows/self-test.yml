@@ -1,0 +1,28 @@
+# Installs ct with the action's defaults on a GitHub-hosted runner: the download, its SHA-256 and
+# its cosign signature against the CircuitTwin release key, then `ct --version`.
+name: self-test
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  install:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install ct with the action's defaults
+        shell: sh
+        env:
+          CT_VERSION: '0.1.0'
+          CT_URL: https://circuittwindownloads.blob.core.windows.net/cli/releases/0.1.0-b138e57177ac/ct-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+          CT_SHA256: 336c50c29130bca0352a4d226455e431b9814096e17d87a58d39da62cd0b7734
+          CT_COSIGN_PUBLIC_KEY: |
+            -----BEGIN PUBLIC KEY-----
+            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFDJHAM/d8TlXer8Y3r8uKSwUYupH
+            dd7DUAr9xr1BbCLyszGa+F17+UWu0CRon3OYA2J6JQmBNGd9ZNOcuCq2vw==
+            -----END PUBLIC KEY-----
+        run: sh scripts/install-ct.sh
+      - name: ct runs
+        run: ct --version && ct --help | head -3
