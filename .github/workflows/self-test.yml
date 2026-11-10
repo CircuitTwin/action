@@ -26,3 +26,22 @@ jobs:
         run: sh scripts/install-ct.sh
       - name: ct runs
         run: ct --version && ct --help | head -3
+
+  macos:
+    # The published one-line install on real Macs: Apple silicon and Intel.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install with the one-line command
+        run: curl -fsSL https://circuittwindownloads.blob.core.windows.net/cli/install.sh | sh
+      - name: ct runs
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          uname -m && sw_vers -productVersion
+          ct --version
+          ct --help | head -3
+          codesign -dv "$(command -v ct)" 2>&1 | head -4 || true
+          ct hw --help; echo "ct hw exit: $?"
