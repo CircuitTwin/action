@@ -1,0 +1,27 @@
+# Example CircuitTwin test suite for CI (schema ct.test-suite/1).
+#
+# Firmware paths are relative to this file; `ct` uploads each image (reused by its SHA-256
+# when the workspace already holds it) and runs every case on the board named here.
+# The board must exist in the workspace the access token belongs to; boards are created in
+# the CircuitTwin app or with `ct cloud board`.
+schemaVersion: ct.test-suite/1
+id: firmware-smoke
+name: Firmware smoke test
+defaults:
+  board:
+    id: sample-nucleo-f767zi
+  limits:
+    maxVirtualTimeNs: 30000000000
+    maxWallMs: 900000
+cases:
+  - id: boots
+    name: Firmware boots and the timer interrupt fires
+    firmware:
+      path: ../../build/firmware.elf
+      name: firmware
+    assertions:
+      - kind: marker
+        pass: CT-BAREMARKER-DONE
+        fail: CT-BAREMARKER-TIMER-IRQ-FAIL
+      - kind: no_fault
+    tags: [smoke]

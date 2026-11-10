@@ -1,0 +1,153 @@
+name: CircuitTwin tests
+description: Run CircuitTwin test suites on every push, publish JUnit and JSON reports, and fail the job when a case fails.
+author: CircuitTwin
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  suite:
+    description: Suite file to run, or several files one per line. Firmware paths in a suite are relative to the suite file.
+    required: true
+  token:
+    description: CircuitTwin access token (ctk_...) with the runs and suites scopes. Store it as a repository secret.
+    required: true
+  server:
+    description: CircuitTwin server origin.
+    required: false
+    default: https://app.circuittwin.ai
+  ct-version:
+    description: Version the installed ct must report. The job fails on any other version.
+    required: false
+    default: '0.1.0'
+  ct-url:
+    description: https URL of the pinned ct Linux x86-64 download (a .tar.gz holding ct, or the binary).
+    required: false
+    default: 'https://circuittwindownloads.blob.core.windows.net/cli/releases/0.1.0-b138e57177ac/ct-0.1.0-x86_64-unknown-linux-gnu.tar.gz'
+  ct-sha256:
+    description: SHA-256 of the ct download. The job refuses a download that does not match.
+    required: false
+    default: '336c50c29130bca0352a4d226455e431b9814096e17d87a58d39da62cd0b7734'
+  ct-path:
+    description: Use this already-installed ct instead of downloading one (a self-hosted runner image, or a build from the same job).
+    required: false
+    default: ''
+  cosign-public-key:
+    description: Release public key (PEM text). When set, the ct download must also carry a valid cosign signature bundle.
+    required: false
+    default: |
+      -----BEGIN PUBLIC KEY-----
+      MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEFDJHAM/d8TlXer8Y3r8uKSwUYupH
+      dd7DUAr9xr1BbCLyszGa+F17+UWu0CRon3OYA2J6JQmBNGd9ZNOcuCq2vw==
+      -----END PUBLIC KEY-----
+  ct-signature-url:
+    description: URL of the cosign bundle of the ct download. Default is ct-url with .sigstore.json appended.
+    required: false
+    default: ''
+  allow-insecure-http:
+    description: Permit an http ct-url (a mirror on a private network). The checksum still applies.
+    required: false
+    default: 'false'
+  timeout-seconds:
+    description: How long to wait for each suite. When it runs out the suite's queued cases are cancelled and the job fails.
+    required: false
+    default: '1800'
+  comment-on-pr:
+    description: Post (and update) one summary comment on the pull request. Needs pull-requests write permission.
+    required: false
+    default: 'false'
+  github-token:
+    description: Token used only for the pull request comment.
+    required: false
+    default: ${{ github.token }}
+  results-dir:
+    description: Directory for the JUnit XML, JSON report and summary of each suite.
+    required: false
+    default: circuittwin-results
+  upload-artifacts:
+    description: Upload the results directory as a workflow artifact.
+    required: false
+    default: 'true'
+  artifact-name:
+    description: Name of the uploaded artifact.
+    required: false
+    default: circuittwin-test-results
+
+outputs:
+  result:
+    description: passed, failed (a case did not pass) or error (the suite could not run).
+    value: ${{ steps.run.outputs.result }}
+  exit-code:
+    description: 0 every case passed, 1 a case did not pass, 2 invalid suite or credentials, 3 service error or timeout.
+    value: ${{ steps.run.outputs.exit-code }}
+  results-dir:
+    description: Directory holding the results.
+    value: ${{ steps.run.outputs.results-dir }}
+  suite-url:
+    description: Link to the last suite run in the CircuitTwin app.
+    value: ${{ steps.run.outputs.suite-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install ct
+      shell: bash
+      env:
+        CT_PATH: ${{ inputs.ct-path }}
+        CT_URL: ${{ inputs.ct-url }}
+        CT_SHA256: ${{ inputs.ct-sha256 }}
+        CT_VERSION: ${{ inputs.ct-version }}
+        CT_COSIGN_PUBLIC_KEY: ${{ inputs.cosign-public-key }}
+        CT_SIGNATURE_URL: ${{ inputs.ct-signature-url }}
+        CT_ALLOW_INSECURE_HTTP: ${{ inputs.allow-insecure-http }}
+      run: sh "$GITHUB_ACTION_PATH/scripts/install-ct.sh"
+
+    - name: Run CircuitTwin suites
+      id: run
+      shell: bash
+      env:
+        CT_SUITES: ${{ inputs.suite }}
+        CT_SERVER: ${{ inputs.server }}
+        CT_TOKEN: ${{ inputs.token }}
+        CT_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        CT_RESULTS_DIR: ${{ inputs.results-dir }}
+      run: |
+        # The token never appears on a command line; keep it out of the log if a caller passed a plain value.
+        echo "::add-mask::$CT_TOKEN"
+        export CT_SUMMARY_FILE="$GITHUB_STEP_SUMMARY" CT_OUTPUT_FILE="$GITHUB_OUTPUT"
+        # Keep going after a failing case so the results are uploaded and the comment is posted.
+        code=0
+        sh "$GITHUB_ACTION_PATH/scripts/run-suites.sh" || code=$?
+        if ! grep -q '^exit-code=' "$GITHUB_OUTPUT" 2>/dev/null; then
+          printf 'exit-code=%s\nresult=error\nresults-dir=%s\n' "$code" "$CT_RESULTS_DIR" >>"$GITHUB_OUTPUT"
+        fi
+        exit 0
+
+    - name: Upload results
+      if: ${{ always() && inputs.upload-artifacts == 'true' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.results-dir }}
+        if-no-files-found: ignore
+
+    - name: Comment on the pull request
+      if: ${{ always() && inputs.comment-on-pr == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        SUMMARY_FILE: ${{ inputs.results-dir }}/summary.md
+      run: sh "$GITHUB_ACTION_PATH/scripts/comment-pr.sh"
+
+    - name: Fail when tests did not pass
+      if: ${{ always() }}
+      shell: bash
+      env:
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        RESULT: ${{ steps.run.outputs.result }}
+      run: |
+        if [ "${EXIT_CODE:-3}" != "0" ]; then
+          echo "::error::CircuitTwin tests ${RESULT:-error} (exit code ${EXIT_CODE:-3}); see the job summary and the uploaded results."
+          exit "${EXIT_CODE:-3}"
+        fi

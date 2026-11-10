@@ -1,0 +1,25 @@
+name: CircuitTwin tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write # only for comment-on-pr
+
+jobs:
+  circuittwin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      # Build your firmware here; the suite points at the image it produces.
+      - name: Build firmware
+        run: make firmware # writes build/firmware.elf
+
+      - uses: circuittwin/action@v1
+        with:
+          suite: ct/suite.yaml
+          token: ${{ secrets.CIRCUITTWIN_TOKEN }}
+          comment-on-pr: 'true'
